@@ -235,6 +235,59 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
     }
     ```
 
+### Index Building (NEW!)
+
+#### Build Index (Asynchronous)
+- **POST** `/api/v1/index/build`
+  - Build the search index from all PDFs in document_source directory
+  - Runs in the background, returns immediately
+  - Response:
+    ```json
+    {
+      "success": true,
+      "message": "Indexing started in background. Use /index/status to check progress."
+    }
+    ```
+
+#### Build Index (Synchronous)
+- **POST** `/api/v1/index/build/sync`
+  - Build the search index and wait for completion
+  - May take several minutes for large documents
+  - Response:
+    ```json
+    {
+      "success": true,
+      "message": "Index built successfully",
+      "total_chunks": 1250,
+      "previous_chunks": 800,
+      "files_processed": [
+        {
+          "filename": "stm32_manual.pdf",
+          "pages": 150,
+          "chunks": 1250
+        }
+      ],
+      "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+      "collection_name": "stm32_manual_embedding"
+    }
+    ```
+
+#### Get Index Status
+- **GET** `/api/v1/index/status`
+  - Check the status of background indexing operation
+  - Response:
+    ```json
+    {
+      "is_running": false,
+      "last_result": {
+        "success": true,
+        "message": "Index built successfully",
+        "total_chunks": 1250
+      },
+      "progress": null
+    }
+    ```
+
 ## Interactive API Documentation
 
 Once the server is running, visit:
@@ -242,6 +295,81 @@ Once the server is running, visit:
 - ReDoc: http://localhost:8000/redoc
 
 ## Example Usage
+
+### Complete Workflow (NEW!)
+
+Here's a complete workflow using the new API endpoints:
+
+#### 1. Upload a document
+**Using curl (Windows PowerShell):**
+```powershell
+curl.exe -X POST "http://localhost:8000/api/v1/files/upload" `
+  -F "file=@C:\path\to\stm32_manual.pdf"
+```
+
+#### 2. Build the index via API
+**Using curl (Windows PowerShell):**
+```powershell
+# Start indexing in background
+curl.exe -X POST "http://localhost:8000/api/v1/index/build"
+
+# Check status
+curl.exe http://localhost:8000/api/v1/index/status
+
+# OR build synchronously (waits for completion)
+curl.exe -X POST "http://localhost:8000/api/v1/index/build/sync"
+```
+
+**Using Python:**
+```python
+import requests
+import time
+
+# Start indexing
+response = requests.post("http://localhost:8000/api/v1/index/build")
+print(response.json())
+
+# Check status periodically
+while True:
+    status = requests.get("http://localhost:8000/api/v1/index/status")
+    data = status.json()
+    print(f"Indexing running: {data['is_running']}")
+    
+    if not data['is_running'] and data['last_result']:
+        print("Indexing complete!")
+        print(data['last_result'])
+        break
+    
+    time.sleep(2)  # Wait 2 seconds before checking again
+```
+
+#### 3. Search the documentation
+**Using curl (Windows PowerShell):**
+```powershell
+curl.exe -X POST "http://localhost:8000/api/v1/search" `
+  -H "Content-Type: application/json" `
+  -d '{\"query\": \"GPIO configuration\", \"k\": 3}'
+```
+
+**Using Python:**
+```python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/api/v1/search",
+    json={"query": "GPIO configuration", "k": 3}
+)
+
+results = response.json()
+print(f"Query: {results['query']}")
+print(f"Found {results['total_results']} results:\n")
+
+for result in results['results']:
+    print(f"Score: {result['score']:.4f}")
+    print(f"Source: {result['source']}, Page: {result['page']}")
+    print(f"Text: {result['text'][:200]}...")
+    print("-" * 80)
+```
 
 ### File Management
 

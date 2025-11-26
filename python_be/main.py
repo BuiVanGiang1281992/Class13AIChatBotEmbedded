@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.routes import search_router
 from api.file_routes import file_router
+from api.index_routes import index_router
 
 app = FastAPI(
     title="STM32 Manual Search API",
@@ -16,11 +17,12 @@ app = FastAPI(
     * **Vector Embeddings**: Powered by sentence-transformers for accurate results
     * **Fast & Efficient**: ChromaDB for high-performance vector similarity search
     * **File Management**: Upload, list, and delete document files
+    * **Index Building**: Build and rebuild search index from uploaded documents
     * **RESTful API**: Standard HTTP endpoints with JSON responses
     
     ### Getting Started
     1. Upload documents using the `/api/v1/files/upload` endpoint
-    2. Build the index by running `python build_index.py`
+    2. Build the index using the `/api/v1/index/build` endpoint
     3. Use the `/api/v1/search` endpoint to search documentation
     4. Check `/api/v1/collection/stats` for collection information
     5. Visit `/health` for API health status
@@ -43,6 +45,10 @@ app = FastAPI(
             "description": "File management operations for document source files",
         },
         {
+            "name": "index",
+            "description": "Index building and management operations",
+        },
+        {
             "name": "system",
             "description": "System health and information endpoints",
         },
@@ -61,6 +67,7 @@ app.add_middleware(
 # Include routers
 app.include_router(search_router, prefix="/api/v1", tags=["search"])
 app.include_router(file_router, prefix="/api/v1", tags=["files"])
+app.include_router(index_router, prefix="/api/v1", tags=["index"])
 
 @app.get(
     "/",
