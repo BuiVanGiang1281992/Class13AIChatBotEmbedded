@@ -29,15 +29,6 @@ interface Conversation {
   timestamp: Date;
 }
 
-interface UploadedFile {
-  id: string;
-  name: string;
-  size: number;
-  type: string;
-  timestamp: Date;
-  conversationId: string;
-}
-
 export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -60,7 +51,6 @@ export default function App() {
   ]);
 
   const [currentConversationId, setCurrentConversationId] = useState<string>('1');
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [viewMode, setViewMode] = useState<'chat' | 'documents'>('chat');
   // track pending bot responses per conversation to avoid duplicate sends/placeholders
   const [pendingResponses, setPendingResponses] = useState<Record<string, boolean>>({});
@@ -161,10 +151,6 @@ export default function App() {
     setViewMode('chat');
   };
 
-  const handleDeleteFile = (fileId: string) => {
-    setUploadedFiles((prev) => prev.filter((file) => file.id !== fileId));
-  };
-
   const handleSendMessage = (content: string, file?: File) => {
     if (!currentConversationId) return;
   // If we're already waiting for a bot response for this conversation, ignore additional sends
@@ -196,19 +182,6 @@ export default function App() {
           }
         : undefined,
     };
-
-    // Track uploaded files
-    if (file) {
-      const uploadedFile: UploadedFile = {
-        id: Date.now().toString(),
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        timestamp: new Date(),
-        conversationId: currentConversationId,
-      };
-      setUploadedFiles((prev) => [uploadedFile, ...prev]);
-    }
 
     // Update conversation with user message
     setConversations((prev) =>
@@ -390,15 +363,13 @@ export default function App() {
   if (viewMode === 'documents') {
     return (
       <DocumentManager
-        files={uploadedFiles}
-        onDeleteFile={handleDeleteFile}
         onBack={() => setViewMode('chat')}
       />
     );
   }
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
+    <div className="flex min-h-screen bg-linear-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
       {/* Sidebar Menu */}
       <Sidebar
         conversations={conversations}
@@ -407,7 +378,7 @@ export default function App() {
         onSelectConversation={handleSelectConversation}
         onDeleteConversation={handleDeleteConversation}
         onOpenDocuments={() => setViewMode('documents')}
-        uploadedFilesCount={uploadedFiles.length}
+        uploadedFilesCount={0}
       />
 
       {/* Main Content */}
