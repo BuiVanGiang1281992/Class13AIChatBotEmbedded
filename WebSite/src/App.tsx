@@ -30,6 +30,7 @@ export interface Message {
     type: string;
   };
   sources?: DocumentSource[];
+  audio?: string; // Added audio property for audio playback
 }
 
 interface Conversation {
@@ -400,7 +401,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-screen bg-linear-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
+    <div className="flex h-screen overflow-hidden bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
       {/* Sidebar Menu */}
       <Sidebar
         conversations={conversations}
