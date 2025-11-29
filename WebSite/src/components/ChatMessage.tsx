@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Bot, User, FileText, Volume, Volume2 } from 'lucide-react';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
+import { LoadingSpinner } from './LoadingSpinner';
 
 interface ChatMessageProps {
   message: Message;
@@ -62,6 +63,11 @@ export function ChatMessage({ message }: ChatMessageProps) {
               <SpeakerControl message={message} />
             )}
           </div>
+          {message.loading ? (
+            <LoadingSpinner size="md" />
+          ) : (
+            <p className="whitespace-pre-wrap break-words">{message.content}</p>
+          )}
         </Card>
 
         {/* Timestamp */}
