@@ -1,22 +1,36 @@
-import { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage } from './components/ChatMessage';
 import { ChatInput } from './components/ChatInput';
 import { Sidebar } from './components/Sidebar';
 import { DocumentManager } from './components/DocumentManager';
+import { PdfViewer } from './components/PdfViewer';
 import { Card } from './components/ui/card';
 import { ScrollArea } from './components/ui/scroll-area';
 import { Code2 } from 'lucide-react';
+import { API_ROOT } from './config';
+
+export interface DocumentSource {
+  text: string;
+  source: string;
+  page?: number;
+  chunk_id?: string;
+  distance?: number;
+  score?: number;
+}
 
 export interface Message {
   id: string;
   type: 'user' | 'bot';
   content: string;
+  loading?: boolean;
   timestamp: Date;
   file?: {
     name: string;
     size: number;
     type: string;
   };
+  sources?: DocumentSource[];
+  audio?: string; // Added audio property for audio playback
 }
 
 interface Conversation {
@@ -27,16 +41,9 @@ interface Conversation {
   timestamp: Date;
 }
 
-interface UploadedFile {
-  id: string;
-  name: string;
-  size: number;
-  type: string;
-  timestamp: Date;
-  conversationId: string;
-}
-
 export default function App() {
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
   const [conversations, setConversations] = useState<Conversation[]>([
     {
       id: '1',
@@ -56,12 +63,25 @@ export default function App() {
   ]);
 
   const [currentConversationId, setCurrentConversationId] = useState<string>('1');
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [viewMode, setViewMode] = useState<'chat' | 'documents'>('chat');
+  // track pending bot responses per conversation to avoid duplicate sends/placeholders
+  const [pendingResponses, setPendingResponses] = useState<Record<string, boolean>>({});
+  const pendingResponsesRef = useRef<Record<string, boolean>>({});
+  const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
+  const [pdfViewerConfig, setPdfViewerConfig] = useState<{
+    url: string;
+    page?: number;
+    searchText?: string;
+  } | null>(null);
 
   const currentConversation = conversations.find(
     (c) => c.id === currentConversationId
   );
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [currentConversation?.messages]);
 
   const handleNewChat = () => {
     const newConversation: Conversation = {
@@ -149,12 +169,22 @@ export default function App() {
     setViewMode('chat');
   };
 
-  const handleDeleteFile = (fileId: string) => {
-    setUploadedFiles((prev) => prev.filter((file) => file.id !== fileId));
-  };
-
   const handleSendMessage = (content: string, file?: File) => {
     if (!currentConversationId) return;
+  // If we're already waiting for a bot response for this conversation, ignore additional sends
+  if (pendingResponsesRef.current[currentConversationId]) return;
+
+    // Guard: prevent duplicate sends (sometimes browsers/firefox/extension may fire twice)
+    const lastMsg = currentConversation?.messages[currentConversation.messages.length - 1];
+    if (
+      lastMsg &&
+      lastMsg.type === 'user' &&
+      lastMsg.content === content &&
+      ((file && lastMsg.file && lastMsg.file.name === file.name) || (!file && !lastMsg.file))
+    ) {
+      // ignore duplicate send
+      return;
+    }
 
     // Add user message
     const userMessage: Message = {
@@ -171,19 +201,6 @@ export default function App() {
         : undefined,
     };
 
-    // Track uploaded files
-    if (file) {
-      const uploadedFile: UploadedFile = {
-        id: Date.now().toString(),
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        timestamp: new Date(),
-        conversationId: currentConversationId,
-      };
-      setUploadedFiles((prev) => [uploadedFile, ...prev]);
-    }
-
     // Update conversation with user message
     setConversations((prev) =>
       prev.map((c) =>
@@ -199,65 +216,215 @@ export default function App() {
       )
     );
 
-    // Simulate bot response
-    setTimeout(() => {
-      const botMessage: Message = {
+    // Call backend API to get bot response (async)
+    (async () => {
+      const placeholderMessage: Message = {
         id: (Date.now() + 1).toString(),
         type: 'bot',
-        content: getBotResponse(content, file),
+        content: '',
+        loading: true,
         timestamp: new Date(),
       };
 
-      setConversations((prev) =>
-        prev.map((c) =>
+      // Add placeholder immediately so user sees a reply is coming
+      setConversations((prev: Conversation[]) =>
+        prev.map((c: Conversation) =>
           c.id === currentConversationId
             ? {
                 ...c,
-                messages: [...c.messages, botMessage],
+                // avoid adding duplicate placeholder if one is already last (check loading flag)
+                messages:
+                  c.messages.length > 0 && c.messages[c.messages.length - 1].loading === true
+                    ? c.messages
+                    : [...c.messages, placeholderMessage],
               }
             : c
         )
       );
-    }, 1000);
+
+  // mark pending for this conversation (ref updated immediately to avoid race)
+  pendingResponsesRef.current = { ...pendingResponsesRef.current, [currentConversationId]: true };
+  setPendingResponses((prev) => ({ ...prev, [currentConversationId]: true }));
+
+      try {
+        const response = await getBotResponse(content);
+
+        const botMessage: Message = {
+          id: (Date.now() + 2).toString(),
+          type: 'bot',
+          content: response.text,
+          timestamp: new Date(),
+          sources: response.sources,
+        };
+
+        // Replace placeholder with actual bot message
+        setConversations((prev: Conversation[]) =>
+          prev.map((c: Conversation) =>
+            c.id === currentConversationId
+              ? {
+                  ...c,
+                  messages: [...c.messages.slice(0, -1), botMessage],
+                }
+              : c
+          )
+        );
+
+        // clear pending flag
+        pendingResponsesRef.current = { ...pendingResponsesRef.current };
+        delete pendingResponsesRef.current[currentConversationId];
+        setPendingResponses((prev) => {
+          const copy = { ...prev };
+          delete copy[currentConversationId];
+          return copy;
+        });
+      } catch (err: any) {
+        const errorMessage: Message = {
+          id: (Date.now() + 3).toString(),
+          type: 'bot',
+          content:
+            'Xin lỗi, có lỗi xảy ra khi gọi tới server: ' + (err?.message || String(err)),
+          timestamp: new Date(),
+        };
+
+        // Replace placeholder with error message
+        setConversations((prev: Conversation[]) =>
+          prev.map((c: Conversation) =>
+            c.id === currentConversationId
+              ? {
+                  ...c,
+                  messages: [...c.messages.slice(0, -1), errorMessage],
+                }
+              : c
+          )
+        );
+
+        // clear pending flag on error as well
+        pendingResponsesRef.current = { ...pendingResponsesRef.current };
+        delete pendingResponsesRef.current[currentConversationId];
+        setPendingResponses((prev) => {
+          const copy = { ...prev };
+          delete copy[currentConversationId];
+          return copy;
+        });
+      }
+    })();
   };
 
-  const getBotResponse = (userInput: string, file?: File): string => {
-    if (file) {
-      return `Tôi đã nhận được file "${file.name}". Trong môi trường thực tế, tôi sẽ phân tích nội dung file và cung cấp feedback về code, syntax errors, hoặc optimization suggestions.`;
-    }
+  const handleAddNotice = (content: string) => {
+    if (!currentConversationId) return;
+    const noticeMessage: Message = {
+      id: Date.now().toString(),
+      type: 'bot',
+      content,
+      timestamp: new Date(),
+    };
 
-    const input = userInput.toLowerCase();
-    if (input.includes('gpio') || input.includes('pin')) {
-      return 'GPIO (General Purpose Input/Output) là interface cơ bản nhất để điều khiển hardware. Bạn cần vấn đề gì về GPIO configuration, interrupt handling, hay pull-up/pull-down resistors?';
-    }
-    if (input.includes('uart') || input.includes('serial')) {
-      return 'UART là protocol serial communication phổ biến. Hãy đảm bảo baud rate, parity, và stop bits được cấu hình đúng ở cả hai thiết bị. Bạn đang gặp vấn đề gì với UART?';
-    }
-    if (input.includes('i2c') || input.includes('spi')) {
-      return 'I2C và SPI là các bus communication protocol phổ biến. I2C chỉ cần 2 dây (SDA, SCL) nhưng chậm hơn SPI. SPI nhanh hơn nhưng cần nhiều pins hơn. Bạn cần giúp về protocol nào?';
-    }
-    if (input.includes('interrupt') || input.includes('irq')) {
-      return 'Interrupts cho phép CPU phản ứng nhanh với events. Lưu ý: ISR nên ngắn gọn, tránh blocking operations, và cẩn thận với shared resources (race conditions). Bạn cần giúp gì về interrupt handling?';
-    }
-    if (input.includes('timer') || input.includes('pwm')) {
-      return 'Timers và PWM rất quan trọng cho real-time control. PWM duty cycle và frequency quyết định điện áp output trung bình. Bạn đang làm project gì cần timers?';
-    }
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === currentConversationId
+          ? {
+              ...c,
+              messages: [...c.messages, noticeMessage],
+              lastMessage: content.substring(0, 50),
+              timestamp: new Date(),
+            }
+          : c
+      )
+    );
+  };
 
-    return 'Tôi hiểu rồi. Đây là mock response cho câu hỏi của bạn. Trong ứng dụng thực tế, tôi sẽ được kết nối với AI backend để cung cấp câu trả lời chi tiết về embedded development, debugging, và optimization.';
+  const getBotResponse = async (userInput: string, file?: File): Promise<{ text: string; sources: DocumentSource[] }> => {
+  // Basic POST to backend chat endpoint. Expects response shape { assistant_response, search_results }
+  const endpoint = `${API_ROOT}/api/v1/chat/chat`;
+    try {
+      const resp = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ prompt: userInput }),
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`Server returned ${resp.status}: ${text}`);
+      }
+
+      const data = await resp.json();
+
+      // Normalize assistant response to a string. Backend may return structured data.
+      let assistant = '';
+      const raw = data?.assistant_response ?? data;
+
+      if (typeof raw === 'string') {
+        assistant = raw;
+      } else if (raw && typeof raw === 'object') {
+        // Try common fields
+        if (typeof raw.content === 'string') {
+          assistant = raw.content;
+        } else if (raw.message && typeof raw.message === 'string') {
+          assistant = raw.message;
+        } else if (raw.choices && Array.isArray(raw.choices) && raw.choices[0]) {
+          // Handle chat completion-like objects
+          const choice = raw.choices[0];
+          if (typeof choice.text === 'string') assistant = choice.text;
+          else if (choice.message && typeof choice.message.content === 'string') assistant = choice.message.content;
+          else assistant = JSON.stringify(raw, null, 2);
+        } else {
+          assistant = JSON.stringify(raw, null, 2);
+        }
+      } else if (typeof data === 'string') {
+        assistant = data;
+      } else {
+        assistant = 'Không có phản hồi hợp lệ từ server.';
+      }
+
+      // Extract sources from backend response
+      const sources: DocumentSource[] = data?.sources || [];
+
+      return { text: assistant, sources };
+    } catch (err: any) {
+      // bubble up the error to caller so it can show a message
+      throw err;
+    }
+  };
+
+  const handleOpenPdf = (source: string, page?: number, searchText?: string) => {
+    // Extract just the filename from the source path (e.g., "document_source/file.pdf" -> "file.pdf")
+    const filename = source.split('/').pop() || source.split('\\').pop() || source;
+    const pdfUrl = `${API_ROOT}/api/v1/files/view/${encodeURIComponent(filename)}`;
+    console.log('Opening PDF:', { source, filename, pdfUrl, page, searchText });
+    
+    // Build URL with query parameters for PDF viewer page
+    const baseUrl = window.location.origin;
+    const params = new URLSearchParams({
+      url: encodeURIComponent(pdfUrl),
+      page: (page || 1).toString(),
+    });
+    
+    if (searchText) {
+      params.set('search', searchText);
+    }
+    
+    // Open PDF viewer in a new tab
+    window.open(`${baseUrl}?${params.toString()}`, '_blank');
+  };
+
+  const handleClosePdf = () => {
+    setPdfViewerOpen(false);
+    setPdfViewerConfig(null);
   };
 
   if (viewMode === 'documents') {
     return (
       <DocumentManager
-        files={uploadedFiles}
-        onDeleteFile={handleDeleteFile}
         onBack={() => setViewMode('chat')}
       />
     );
   }
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
+    <div className="flex h-screen overflow-hidden bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
       {/* Sidebar Menu */}
       <Sidebar
         conversations={conversations}
@@ -266,7 +433,7 @@ export default function App() {
         onSelectConversation={handleSelectConversation}
         onDeleteConversation={handleDeleteConversation}
         onOpenDocuments={() => setViewMode('documents')}
-        uploadedFilesCount={uploadedFiles.length}
+        uploadedFilesCount={0}
       />
 
       {/* Main Content */}
@@ -296,16 +463,27 @@ export default function App() {
             <ScrollArea className="h-full p-4">
               <div className="space-y-4">
                 {currentConversation?.messages.map((message) => (
-                  <ChatMessage key={message.id} message={message} />
+                  <ChatMessage key={message.id} message={message} onOpenPdf={handleOpenPdf} />
                 ))}
+                <div ref={messagesEndRef} />
               </div>
             </ScrollArea>
           </Card>
 
           {/* Chat Input */}
-          <ChatInput onSendMessage={handleSendMessage} />
+          <ChatInput onSendMessage={handleSendMessage} onAddNotice={handleAddNotice} isSending={!!pendingResponses[currentConversationId]} />
         </div>
       </div>
+
+      {/* PDF Viewer Modal */}
+      {pdfViewerOpen && pdfViewerConfig && (
+        <PdfViewer
+          pdfUrl={pdfViewerConfig.url}
+          pageNumber={pdfViewerConfig.page}
+          searchText={pdfViewerConfig.searchText}
+          onClose={handleClosePdf}
+        />
+      )}
     </div>
   );
 }

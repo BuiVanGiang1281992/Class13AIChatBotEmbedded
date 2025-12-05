@@ -1,21 +1,24 @@
 import os
 import json
 import time
+from dotenv import load_dotenv
 from tenacity import retry, wait_random_exponential, stop_after_attempt, retry_if_exception_type
 from openai import AzureOpenAI
 from openai import RateLimitError, APIError
 from services.search_service import SearchService
 
-AZURE_OPENAI_API_KEY = "SampleKey1234"  # Replace with your actual key
+# Load environment variables from .env file
+load_dotenv()
 
-os.environ.setdefault("AZURE_OPENAI_ENDPOINT", "https://aiportalapi.stu-platform.live/jpe")
-os.environ.setdefault("AZURE_OPENAI_API_KEY", AZURE_OPENAI_API_KEY)
-os.environ.setdefault("AZURE_DEPLOYMENT_NAME", "GPT-4o-mini")
+# Get Azure OpenAI settings from environment variables
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "https://aiportalapi.stu-platform.live/jpe")
+AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
+AZURE_DEPLOYMENT_NAME = os.getenv("AZURE_DEPLOYMENT_NAME", "GPT-4o-mini")
 
 client = AzureOpenAI(
     api_version="2024-07-01-preview",
-    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+    azure_endpoint=AZURE_OPENAI_ENDPOINT,
+    api_key=AZURE_OPENAI_API_KEY,
 )
 
 # function schema that the model can call to trigger a local search
@@ -43,7 +46,7 @@ functions = [
 )
 def call_openai(messages, functions_arg=None, function_call="auto"):
     return client.chat.completions.create(
-        model=os.getenv("AZURE_DEPLOYMENT_NAME"),
+        model=AZURE_DEPLOYMENT_NAME,
         messages=messages,
         functions=functions_arg,
         function_call=function_call,
@@ -69,7 +72,25 @@ def handle_search_function_call(func_call):
     query = args.get("query")
     k = int(args.get("k", 5))
     svc = SearchService()
-    return svc.search(query=query, k=k)
+    raw_results = svc.search(query=query, k=k)
+    
+    # Format results for better consumption
+    formatted_results = []
+    if raw_results and "documents" in raw_results and raw_results["documents"]:
+        for i, doc in enumerate(raw_results["documents"][0]):
+            metadata = raw_results["metadatas"][0][i] if raw_results.get("metadatas") else {}
+            distance = raw_results["distances"][0][i] if raw_results.get("distances") else None
+            
+            formatted_results.append({
+                "text": doc,
+                "source": metadata.get("source", "unknown"),
+                "page": metadata.get("page", None),
+                "chunk_id": metadata.get("chunk_id", None),
+                "distance": distance,
+                "score": 1 - distance if distance is not None else None
+            })
+    
+    return {"results": formatted_results, "raw": raw_results}
 
 def chat_search_auto(prompt: str):
     """
