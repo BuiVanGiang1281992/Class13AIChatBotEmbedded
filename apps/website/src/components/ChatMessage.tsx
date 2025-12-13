@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Bot, User, FileText, ExternalLink, Volume, Volume2 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -57,7 +60,100 @@ export function ChatMessage({ message, onOpenPdf }: ChatMessageProps) {
             <LoadingSpinner size="md" />
           ) : (
             <div className="flex items-start gap-2">
-              <p className="whitespace-pre-wrap break-words flex-1">{message.content}</p>
+              {isUser ? (
+                <p className="whitespace-pre-wrap break-words flex-1">{message.content}</p>
+              ) : (
+                <div className="prose prose-sm max-w-none flex-1 dark:prose-invert">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeRaw]}
+                    components={{
+                      code({ node, inline, className, children, ...props }) {
+                        return inline ? (
+                          <code
+                            className="bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-sm font-mono"
+                            {...props}
+                          >
+                            {children}
+                          </code>
+                        ) : (
+                          <code
+                            className="block bg-slate-200 dark:bg-slate-900 p-3 rounded-lg overflow-x-auto text-sm font-mono"
+                            {...props}
+                          >
+                            {children}
+                          </code>
+                        );
+                      },
+                      a({ node, children, ...props }) {
+                        return (
+                          <a
+                            className="text-blue-500 hover:text-blue-600 underline"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            {...props}
+                          >
+                            {children}
+                          </a>
+                        );
+                      },
+                      ul({ node, children, ...props }) {
+                        return <ul className="list-disc pl-5 my-2 space-y-1" {...props}>{children}</ul>;
+                      },
+                      ol({ node, children, ...props }) {
+                        return <ol className="list-decimal pl-5 my-2 space-y-1" {...props}>{children}</ol>;
+                      },
+                      h1({ node, children, ...props }) {
+                        return <h1 className="text-2xl font-bold mt-4 mb-2" {...props}>{children}</h1>;
+                      },
+                      h2({ node, children, ...props }) {
+                        return <h2 className="text-xl font-bold mt-3 mb-2" {...props}>{children}</h2>;
+                      },
+                      h3({ node, children, ...props }) {
+                        return <h3 className="text-lg font-semibold mt-2 mb-1" {...props}>{children}</h3>;
+                      },
+                      blockquote({ node, children, ...props }) {
+                        return (
+                          <blockquote
+                            className="border-l-4 border-slate-300 dark:border-slate-600 pl-4 py-1 my-2 italic"
+                            {...props}
+                          >
+                            {children}
+                          </blockquote>
+                        );
+                      },
+                      table({ node, children, ...props }) {
+                        return (
+                          <div className="overflow-x-auto my-2">
+                            <table className="min-w-full border border-slate-300 dark:border-slate-600" {...props}>
+                              {children}
+                            </table>
+                          </div>
+                        );
+                      },
+                      th({ node, children, ...props }) {
+                        return (
+                          <th
+                            className="border border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-800 px-3 py-2 text-left font-semibold"
+                            {...props}
+                          >
+                            {children}
+                          </th>
+                        );
+                      },
+                      td({ node, children, ...props }) {
+                        return (
+                          <td className="border border-slate-300 dark:border-slate-600 px-3 py-2" {...props}>
+                            {children}
+                          </td>
+                        );
+                      },
+                    }}
+                  >
+                    {message.content}
+                  </ReactMarkdown>
+                </div>
+              )}
 
               {/* Inline speaker icon: plays audio URL or uses TTS fallback for bot */}
               {(message.audio || message.type === "bot") && <SpeakerControl message={message} />}

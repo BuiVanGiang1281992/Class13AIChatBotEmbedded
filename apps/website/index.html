@@ -12,15 +12,68 @@
         defer
       ></script>
       <link rel="preconnect" href="https://challenges.cloudflare.com">
+      <style>
+        .turnstile-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.55);
+          display: none;
+          justify-content: center;
+          align-items: center;
+          z-index: 1000;
+        }
+        .turnstile-modal {
+          position: relative;
+          background: #fff;
+          padding: 20px 16px 16px;
+          border-radius: 10px;
+          width: min(420px, 92vw);
+          box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25);
+          text-align: center;
+        }
+        .turnstile-header {
+          margin-bottom: 12px;
+          font-weight: 700;
+          font-size: 16px;
+        }
+      </style>
     </head>
 
     <body>
-      <div
-        class="cf-turnstile"
-        data-sitekey="0x4AAAAAACGbqmjIYGxmASHA"
-      ></div>
+      <div id="turnstile-overlay" class="turnstile-overlay">
+        <div class="turnstile-modal">
+          <div class="turnstile-header">
+            Complete verification
+          </div>
+          <div
+            class="cf-turnstile"
+            data-sitekey="0x4AAAAAACGbqmjIYGxmASHA"
+            data-theme="light"
+            data-callback="onTurnstileSuccess"
+          ></div>
+        </div>
+      </div>
+
       <div id="root"></div>
       <script type="module" src="/src/main.tsx"></script>
+      <script>
+        const overlay = document.getElementById('turnstile-overlay');
+
+        function showOverlay() {
+          overlay.style.display = 'flex';
+        }
+
+        function hideOverlay() {
+          overlay.style.display = 'none';
+        }
+
+        window.addEventListener('load', showOverlay);
+
+        // Hide automatically once Turnstile is solved
+        window.onTurnstileSuccess = function onTurnstileSuccess() {
+          hideOverlay();
+        };
+      </script>
     </body>
   </html>
   
